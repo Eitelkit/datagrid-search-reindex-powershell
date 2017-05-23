@@ -40,15 +40,15 @@ shieldState is not yet implemented and will be used to pass the esusers name and
 #>
 [CmdletBinding()]
 param(
-[Parameter(Mandatory=$true)]
-$nodeName = "cs-mv1-caw",
-[Parameter(Mandatory=$true)]
-$caseArtifactID = "edds1076732",
-[Parameter(Mandatory=$true)]
+[Parameter(Mandatory=$false)]
+$nodeName = "DG-RAMP-01",
+[Parameter(Mandatory=$false)]
+$caseArtifactID = "edds1017748",
+[Parameter(Mandatory=$false)]
 $prefix = "audit",
-[Parameter(Mandatory=$true)]
-[int]$newShardCount = '2',
-[Parameter(Mandatory=$true)]
+[Parameter(Mandatory=$false)]
+[int]$newShardCount = '1',
+[Parameter(Mandatory=$false)]
 [int]$numberOfReplicas = '1',
 [bool]$shieldState = $false
 )
@@ -100,14 +100,16 @@ Function CreateNewIndex {
 
 }
 
-#Calls ElasticSearch and gets the mappings of the original index.  Returns $mappings
 Function GetMappingsOldIndex {
-    $mappings = (Invoke-RestMethod -URI "http://$nodeName`:9200/$index/_mappings" -Method 'GET' -ContentType $contentType).ToString()
+    (Invoke-RestMethod -URI "http://$nodeName`:9200/$index/_mappings" -Method 'GET' -ContentType $contentType -OutFile .\json.txt)
+
+    $mappings = (Get-Content .\json.txt).ToString()
 
     $mappings = $mappings -replace "{`"$index`":{`"mappings`":"
 
     $script:mappings = $mappings.Substring(0,$mappings.Length-2) 
 }
+
 
 #Applies the mappings to the new index returns void.
 Function ApplyMappingsToNewIndex {
@@ -250,3 +252,5 @@ Function RunTime {
 }
 
 RunTime
+
+Remove-Item .\json.txt
