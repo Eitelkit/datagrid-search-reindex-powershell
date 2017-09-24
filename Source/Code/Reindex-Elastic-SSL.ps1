@@ -164,7 +164,8 @@ Foreach ($originalIndex in $indexList) {
     <#Gets the mappings from the index to be reindex#>
     Function GetMappingsOldIndex {
         Write-Log "Attempting to get mappings from $originalIndex.`r`n"
-        $mappings = (Invoke-RestMethod -URI "https://$nodeName`:9200/$originalIndex/_mappings" -Method 'GET' -ContentType $contentType -Credential $mycreds)
+        (Invoke-RestMethod -URI "https://$nodeName`:9200/$originalIndex/_mappings" -Method 'GET' -ContentType $contentType -Credential $mycreds -OutFile .\json.txt)
+        $mappings = (Get-Content .\json.txt).ToString()
         $mappings = $mappings -replace "{`"$originalIndex`":{`"mappings`":"
         $script:mappings = $mappings.Substring(0,$mappings.Length-2) 
     }
@@ -174,7 +175,7 @@ Foreach ($originalIndex in $indexList) {
         Write-Log "Attempting to apply mappings from $originalIndex to $indexNew.`r`n"
         Try{
             Invoke-RestMethod -URI "https://$nodeName`:9200//_mappings/$indexType" -Method 'PUT' -ContentType $contentType -Credential $mycreds -Body $mappings 2>&1 | %{ "$_" } | Out-Null
-            Write-Verbose "Applying the mappings from the old index to the new index."
+            Write-Log "Applied the mappings from the old index to the new index."
         }
         Catch [System.Net.WebException] {Write-Log "Failed to copy the mappings to the new index.`r`n"}
     }
@@ -225,7 +226,6 @@ Foreach ($originalIndex in $indexList) {
             Write-Host "Check the Log the counts for the indexes $oldDocsCount : $newDocsCount do not match." -ForegroundColor Red;
             Write-Log "Count Error! The count for $originalIndex & $indexNew do not match $oldDocsCount : $newDocsCount.`r`n" 
         }
-
     }
 
     <#Removes the Aliases for both old and new indexes#>
