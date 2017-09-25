@@ -55,7 +55,7 @@ $esPassword =  ConvertTo-SecureString "esadmin" -AsPlainText -Force
 $mycreds = New-Object System.Management.Automation.PSCredential ("esadmin",$esPassword)
 $contentType = 'application/json'
 $getDate = Get-Date -format MM.dd.yy.HH.mm.ss
-$logFile = ".\ReIndexLog.$getDate.txt"
+$logFile = ".\ReIndexLog.$nodeName.$getDate.txt"
 
 <#
     Create a log file bases off the script execution time.
@@ -76,7 +76,9 @@ Function Write-Log{
     Retrieves the list of indexes to be worked on from a file in the script drive called indexes.txt
 #>
 Function GetIndexList{
-[System.Collections.ArrayList]$script:indexList = Get-Content ".\indexes.txt"
+[Object[]]$indexListObject = Get-Content ".\indexes.txt"
+[System.Collections.ArrayList]$script:indexList = $indexListObject
+
 Write-Log "Currently working on the following indexes:`r`n$indexList`r`nEnd List of Indexes`r`n"
 }
 GetIndexList
