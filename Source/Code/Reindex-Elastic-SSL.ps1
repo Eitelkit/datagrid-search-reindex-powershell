@@ -224,9 +224,13 @@ Foreach ($originalIndex in $indexList) {
         if($oldDocsCount -eq $newDocsCount){
             Write-Log "The document count matches for the old and new indexes: $oldDocsCount : $newDocsCount.`r`n"
             Write-Host "Reindexing Completed from $originalIndex to $indexNew... " (($newDocsCount/$oldDocsCount)*100) "% Complete" -ForegroundColor Green
+            Write-Host "Starting 30 second sleep to allow recovery."
+            Sleep -Seconds 30
         }else{
             Write-Host "Check the Log the counts for the indexes $oldDocsCount : $newDocsCount do not match." -ForegroundColor Red;
-            Write-Log "Count Error! The count for $originalIndex & $indexNew do not match $oldDocsCount : $newDocsCount.`r`n" 
+            Write-Log "Count Error! The count for $originalIndex & $indexNew do not match $oldDocsCount : $newDocsCount.`r`n"
+            Write-Host "Starting 30 second sleep to allow recovery."
+            Sleep -Seconds 30
         }
     }
 
