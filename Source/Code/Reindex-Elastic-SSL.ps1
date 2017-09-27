@@ -40,16 +40,16 @@ shieldState is not yet implemented and will be used to pass the esusers name and
 #>
 [CmdletBinding()]
 param(
-[Parameter(Mandatory=$true)]
-$nodeName,
-[Parameter(Mandatory=$true)]
-$prefix,
-[Parameter(Mandatory=$true)]
-$indexType,
-[Parameter(Mandatory=$true)]
-[int]$newShardCount,
-[Parameter(Mandatory=$true)]
-[int]$numberOfReplicas
+[Parameter(Mandatory=$false)]
+$nodeName = "dg-ramp-01",
+[Parameter(Mandatory=$false)]
+$prefix = "marley",
+[Parameter(Mandatory=$false)]
+$indexType = "audit",
+[Parameter(Mandatory=$false)]
+[int]$newShardCount = 1,
+[Parameter(Mandatory=$false)]
+[int]$numberOfReplicas = 1
 )
 $esPassword =  ConvertTo-SecureString "esadmin" -AsPlainText -Force
 $mycreds = New-Object System.Management.Automation.PSCredential ("esadmin",$esPassword)
@@ -191,7 +191,7 @@ Foreach ($originalIndex in $indexList) {
         Try {
         Invoke-RestMethod -Uri "https://$nodeName`:9200/_reindex" -Method Post -ContentType $contentType -Credential $mycreds -Body "{ ""source"": { ""index"": ""$originalIndex"" }, ""dest"": { ""index"": ""$indexNew"" }}"
         }
-        Catch [System.Net.WebException] {Write-Log "Reindex Failed from $originalIndex to $indexNew.`r`nAbort!`r`n"; Exit}
+        Catch [System.Net.WebException] {Write-Log "Reindex Failed from $originalIndex to $indexNew.`r`nAbort!`r`n"}
     }
 
     <#
@@ -214,8 +214,13 @@ Foreach ($originalIndex in $indexList) {
     Function WaitForComplete {
         Do {
             Write-Log "Waiting for the operation to complete.`r`nSleep for 5 seconds.`r`n"
-            Sleep -Seconds 5
+            Sleep -Seconds 15
             CompareDocumentCounts
+            $script:taskStatus = Invoke-RestMethod -Uri "https://$nodeName`:9200/_tasks?actions=*reindex" -Method Get -ContentType $contentType -Credential $mycreds
+            Write-Log "The task status is currently $taskStatus.nodes.  Will be blank for ended task."
+            If ((new-object -type PSObject -Property @{ nodes = "" }).nodes -eq $taskStatus.nodes){
+                Write-Log "The ES task stopped before the counts were equal." ; Break      
+            }
         } Until ($newDocsCount -eq $oldDocsCount)
     }
 
@@ -224,13 +229,9 @@ Foreach ($originalIndex in $indexList) {
         if($oldDocsCount -eq $newDocsCount){
             Write-Log "The document count matches for the old and new indexes: $oldDocsCount : $newDocsCount.`r`n"
             Write-Host "Reindexing Completed from $originalIndex to $indexNew... " (($newDocsCount/$oldDocsCount)*100) "% Complete" -ForegroundColor Green
-            Write-Host "Starting 30 second sleep to allow recovery."
-            Sleep -Seconds 30
         }else{
             Write-Host "Check the Log the counts for the indexes $oldDocsCount : $newDocsCount do not match." -ForegroundColor Red;
-            Write-Log "Count Error! The count for $originalIndex & $indexNew do not match $oldDocsCount : $newDocsCount.`r`n"
-            Write-Host "Starting 30 second sleep to allow recovery."
-            Sleep -Seconds 30
+            Write-Log "Count Error! The count for $originalIndex & $indexNew do not match $oldDocsCount : $newDocsCount.`r`n" ; Exit
         }
     }
 
