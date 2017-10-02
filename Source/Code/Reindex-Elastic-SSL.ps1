@@ -213,13 +213,13 @@ Foreach ($originalIndex in $indexList) {
     <#Uses CompareDocumentCounts to ensure the script does not proceed until reindexing is completed.#>
     Function WaitForComplete {
         Do {
-            Write-Log "Waiting for the operation to complete.`r`nSleep for 5 seconds.`r`n"
-            Sleep -Seconds 5
+            Write-Log "Waiting for the operation to complete.`r`nSleep for 15 seconds.`r`n"
+            Sleep -Seconds 15
             CompareDocumentCounts
             $script:taskStatus = Invoke-RestMethod -Uri "https://$nodeName`:9200/_tasks?actions=*reindex" -Method Get -ContentType $contentType -Credential $mycreds
             Write-Log "The task status is currently $taskStatus.nodes. Will be blank for ended task."
             If ((new-object -type PSObject -Property @{ nodes = "" }).nodes -eq $taskStatus.nodes){
-                Write-Log "The ES task stopped before the counts were equal." ; Break      
+                Write-Log "The ES task stopped before the counts were equal."     
             }
         } Until ($newDocsCount -eq $oldDocsCount)
     }
