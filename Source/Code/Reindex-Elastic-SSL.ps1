@@ -11,22 +11,24 @@ BACKUP YOUR INDEX BEFORE RUNNING THIS SCRIPT!!!
 
 The scripts full run will:
 
-1.) Create a new index which will be the same name incremented by one as a target for the operation.
-2.) Copy the mappings from the old index to the new target index.
-3.) Reindex the documents from the old index to the new target index.
-4.) Remove the mappings created by default from both indexes.
-5.) Add the mappings from the old index to the new index.
-6.) Delete the old index.
+1.) Create a snapshot of all the indexes listed in the indexes.txt file in the same folder as the script.
+2.) The mappings for the original index are applied to the new index
+3.) Reindex the original indee to the orginal name with _r appended to the index name.
+4.) Copy the aliases from the original index to the new index.
+5.) Delete the Old index.
+6.) Create a snapshot of the _r indexes.
+7.) Restore to the orignal name using the _r snapshot.
+8.) Delete the _r indexes.
 
 When the operation is finished no additonal work needs to be done.
 
 .PARAMETER nodeName
 This can be any node in the cluster but the client node should be used and barring that one of the data nodes.
 
-.PARAMETER caseArtifactID
-The Relativity case artifact ID includeing the edds prefix.  This will be the each name of the Relativity Case database.
-
 .PARAMETER prefix
+The prefix given to the index by the Relativity Instance settings for the index prefix.
+
+.PARAMETER indexType
 This will either audit or relativity it cannot be any other word.  The prefix relativity will be for text indexes and audit for audit indexes.
 
 .PARAMETER newShardCount
@@ -35,8 +37,8 @@ An integer value which will be your new shard count on the index generated.
 .PARAMETER numberofReplicas
 This will be the number of Replicas shards created for the new index.
 
-.PARAMETER shieldState
-shieldState is not yet implemented and will be used to pass the esusers name and password to the cluster.
+.PARAMETER repoName
+This is the registered name of the Repository in elastic search to return this value from REST use GET _snapshot
 #>
 [CmdletBinding()]
 param(
@@ -49,7 +51,9 @@ $indexType = "audit",
 [Parameter(Mandatory=$false)]
 [int]$newShardCount = 1,
 [Parameter(Mandatory=$false)]
-[int]$numberOfReplicas = 1
+[int]$numberOfReplicas = 1,
+[Parameter(Mandatory=$false)]
+[string]$repoName = "snickersbar"
 )
 $esPassword =  ConvertTo-SecureString "esadmin" -AsPlainText -Force
 $mycreds = New-Object System.Management.Automation.PSCredential ("esadmin",$esPassword)
@@ -66,7 +70,8 @@ New-Item -Path $logFile -ItemType file -force | Out-Null
     Creates the Write-Log function which writes to a log file by default.
     If the script is run with the Verbose script it will log to the file and the console.
 #>
-Function Write-Log{
+Function Write-Log
+{
    Param ([string]$logstring)
    Add-content $logFile -value $logstring
    Write-Verbose $logstring
@@ -75,21 +80,20 @@ Function Write-Log{
 <#
     Retrieves the list of indexes to be worked on from a file in the script drive called indexes.txt
 #>
-Function GetIndexList{
+Function GetIndexList
+{
 [Object[]]$indexListObject = Get-Content ".\indexes.txt"
 [System.Collections.ArrayList]$script:indexList = $indexListObject
 
 Write-Log "Currently working on the following indexes:`r`n$indexList`r`nEnd List of Indexes`r`n"
 }
-GetIndexList
-
-Write-Log "The list of indexes before index check is $indexList.`r`n"
 
 <#
     Checks if the index exists in Elastic
     If it doesn't exist the user will be prompted to skip or remove the index from the indexes.txt file.
 #>
-Function CheckIndexExists {
+Function CheckIndexExists 
+{
     foreach ($index in $indexList){
         Try{
             Invoke-RestMethod -URI "https://$nodeName`:9200/$index" -Method 'HEAD' -ContentType 'application/json' -Credential $mycreds 2>&1 | %{ "$_" } 
@@ -108,6 +112,112 @@ Function CheckIndexExists {
         }
     }
 }
+
+function CreateOriginalSnapShot 
+{
+    $indexListString = $indexList -join ","
+    $snapName = "original_snapshot_" + (get-date -Format MM.dd_hh.mm.ss)
+    $body = @"
+    {
+    "indices": "$indexListString"
+    }
+"@
+    Invoke-RestMethod -Uri "https://$nodeName`:9200/_snapshot/$repoName/$snapName" -Method Put -ContentType $contentType -Credential $mycreds -Body $body 2>&1 | %{ "$_" } | Out-Null
+}
+
+function SnapShotStatusLoop{
+    Do {
+        Start-Sleep -s 10
+        $snapStatus = Invoke-RestMethod -Uri "https://$nodeName`:9200/_snapshot/_status" -Method Get -ContentType $contentType -Credential $mycreds
+        $started = ($snapStatus.snapshots | Select-Object -ExpandProperty shards_stats).started
+        If ($started -eq $null){
+            $started = 0
+        }
+        $done = ($snapStatus.snapshots | Select-Object -ExpandProperty shards_stats).done
+        If ($done -eq $null){
+            $done = 0
+        }
+        if($started -ne 0 -and $done -ne 0){
+            Write-Host "A snapshot is running $started shards started and $done shards done." -ForegroundColor Yellow
+        }
+        #$failed = (($snapStatus.snapshots | Select-Object shards_stats).shards_stats).failed
+    } Until (!$snapStatus.snapshots)
+}
+
+function GetSnapShotStatus 
+{
+        $snapInfo = Invoke-RestMethod -Uri "https://$nodeName`:9200/_snapshot/$repoName/$snapName" -Method Get -ContentType $contentType -Credential $mycreds
+        $success = ($snapInfo.snapshots | select-object shards).shards.successful
+        $total = ($snapInfo.snapshots | select-object shards).shards.total
+        $failed = ($snapInfo.snapshots | select-object shards).shards.failed
+        Write-Host "$success shards of $total shards were backed up for rename operation.`r`n" -ForegroundColor Green
+        If ($failed -gt 0) {
+            Write-Log $snapInfo.snapshots
+            Write-Host "$failed shard(s) failed to backup." -ForegroundColor Red; Exit
+        }
+}
+
+<#Add the transient setting for wild card usage to the cluster settins#>
+function SetClusterToAllowWildCardOperations
+{
+    $body = "{ ""transient"": { ""action.destructive_requires_name"": ""false"" }}"
+    Invoke-RestMethod -URI "https://$nodeName`:9200/_cluster/settings" -Method Put -ContentType $contentType -Credential $mycreds -Body $body 2>&1 | %{ "$_" } | Out-Null
+    $script:clusterSettings = Invoke-RestMethod "https://$nodeName`:9200/_cluster/settings" -Method Get -ContentType $contentType -Credential $mycreds
+}
+
+function CreateIndexListWithSuffix
+{
+    for($i=0;$i -lt $indexList.Count;$i++)
+    {
+        $script:indexList[$i] = ($indexList[$i]) +"_r"
+    }
+        
+}
+
+function CreateSnapShot 
+{
+    $indexListString = $indexList -join ","
+    $script:snapName = "snapshot_" + (get-date -Format MM.dd_hh.mm.ss)
+    $body = @"
+    {
+    "indices": "$indexListString"
+    }
+"@
+    Invoke-RestMethod -Uri "https://$nodeName`:9200/_snapshot/$repoName/$snapName" -Method Put -ContentType $contentType -Credential $mycreds -Body $body 2>&1 | %{ "$_" } | Out-Null
+}
+
+function RestoreSnapShotRemoveUnderscoreR 
+{
+    $body = @"
+    {
+     "indices": "$indexListString",
+     "ignore_unavailable": "true",
+     "include_global_state": false,
+     "rename_pattern": "^(.*).{2}",
+     "rename_replacement": "`$1"
+    }
+"@
+    Invoke-RestMethod -Uri "https://$nodeName`:9200/_snapshot/$repoName/$snapName/_restore" -Method Post -ContentType $contentType -Credential $mycreds -Body $body 2>&1 | %{ "$_" } | Out-Null
+    Write-Host "Restoring indexes to orginal names.`r`n" -ForegroundColor Green
+}
+
+function RemoveUnderScoreRIndexes {
+    foreach ($index in $indexList){
+    Invoke-RestMethod -Uri "https://$nodeName`:9200/$index" -Method Delete -ContentType $contentType -Credential $mycreds 2>&1 | %{ "$_" } | Out-Null
+    }
+
+}
+
+function SetClusterToDisallowWildCardOperations
+{
+    $body = "{ ""transient"": { ""action.destructive_requires_name"": ""true"" }}"
+    Invoke-RestMethod -URI "https://$nodeName`:9200/_cluster/settings" -Method Put -ContentType $contentType -Credential $mycreds -Body $body 2>&1 | %{ "$_" } | Out-Null
+}
+
+GetIndexList
+
+Write-Log "The list of indexes before index check is $indexList.`r`n"
+
 CheckIndexExists
 
 Write-Log "The list of indexes after index check is $indexList.`r`n"
@@ -115,11 +225,20 @@ Write-Log "Begin reindex on all indexes in the indexes.txt file.`r`n"
 $indexListCount = $indexList.Count
 Write-Log "The index count is $indexListCount.`r`n"
 
+Write-Host "Creating a snapshot of the indexes at this time.`r`n" -foregroundcolor Green
+
+CreateOriginalSnapShot
+
+SnapShotStatusLoop
+
+GetSnapShotStatus
+
 <#
     Begin the for each loop which will reindex all the items in indexList variable.
 #>
 $i = 1
-Foreach ($originalIndex in $indexList) {
+Foreach ($originalIndex in $indexList) 
+{
     $startTime = Get-Date -format MM.dd.yy.HH.mm.ss
     Write-Log "The data time is $startTime `r`n"
     Write-Log "Working on index number $i in the list of indexes.`r`n"
@@ -257,10 +376,11 @@ Foreach ($originalIndex in $indexList) {
         Write-Verbose "The old index: $originalIndex has been deleted."
     }
 
+
     <#
         Main Function where the functions in the for each are called in order.
     #>
-    Function RunTime {
+    Function ReIndexMany {
         NewIndexName
         
         Write-Host "Starting reindexing operations on: $originalIndex to $indexNew.`n" -ForegroundColor Cyan;
@@ -298,5 +418,31 @@ Foreach ($originalIndex in $indexList) {
         Write-LOg "Finished Script run on $originalIndex."
         $i++
     }
-    RunTime
+    ReIndexMany
+
+
 }
+
+<#
+    Create a backup of the _r indexes and restore them to the orginal name
+#>
+
+SetClusterToAllowWildCardOperations
+
+[string]$settings = $clusterSettings.transient.action.destructive_requires_name; Write-Log "Action destructive_requires_name set to $settings.`r`n"
+
+CreateIndexListWithSuffix
+
+Write-Log "The indicies to snapshot are $indexList.`r`n"
+
+CreateSnapShot
+
+SnapShotStatusLoop
+
+GetSnapShotStatus
+
+RestoreSnapShotRemoveUnderscoreR
+
+RemoveUnderScoreRIndexes
+
+SetClusterToDisallowWildCardOperations
