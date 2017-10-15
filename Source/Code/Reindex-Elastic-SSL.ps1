@@ -42,18 +42,18 @@ This is the registered name of the Repository in elastic search to return this v
 #>
 [CmdletBinding()]
 param(
+[Parameter(Mandatory=$true)]
+$nodeName,
+[Parameter(Mandatory=$true)]
+$prefix,
+[Parameter(Mandatory=$true)]
+$indexType,
 [Parameter(Mandatory=$false)]
-$nodeName = "dg-ramp-01",
-[Parameter(Mandatory=$false)]
-$prefix = "marley",
-[Parameter(Mandatory=$false)]
-$indexType = "audit",
-[Parameter(Mandatory=$false)]
-[int]$newShardCount = 1,
+[int]$newShardCount = 2,
 [Parameter(Mandatory=$false)]
 [int]$numberOfReplicas = 1,
-[Parameter(Mandatory=$false)]
-[string]$repoName = "snickersbar"
+[Parameter(Mandatory=$true)]
+[string]$repoName
 )
 $esPassword =  ConvertTo-SecureString "esadmin" -AsPlainText -Force
 $mycreds = New-Object System.Management.Automation.PSCredential ("esadmin",$esPassword)
@@ -116,7 +116,7 @@ Function CheckIndexExists
 function CreateOriginalSnapShot 
 {
     $indexListString = $indexList -join ","
-    $snapName = "original_snapshot_" + (get-date -Format MM.dd_hh.mm.ss)
+    $script:snapName = "original_snapshot_" + (get-date -Format MM.dd_hh.mm.ss)
     $body = @"
     {
     "indices": "$indexListString"
@@ -129,7 +129,7 @@ function SnapShotStatusLoop{
     Do {
         Start-Sleep -s 10
         $snapStatus = Invoke-RestMethod -Uri "https://$nodeName`:9200/_snapshot/_status" -Method Get -ContentType $contentType -Credential $mycreds
-        $started = ($snapStatus.snapshots | Select-Object -ExpandProperty shards_stats).started
+        $total = ($snapStatus.snapshots | Select-Object -ExpandProperty shards_stats).total
         If ($started -eq $null){
             $started = 0
         }
@@ -138,7 +138,7 @@ function SnapShotStatusLoop{
             $done = 0
         }
         if($started -ne 0 -and $done -ne 0){
-            Write-Host "A snapshot is running $started shards started and $done shards done." -ForegroundColor Yellow
+            Write-Host "A snapshot is running on $total shards started and $done shards done." -ForegroundColor Yellow
         }
         #$failed = (($snapStatus.snapshots | Select-Object shards_stats).shards_stats).failed
     } Until (!$snapStatus.snapshots)
