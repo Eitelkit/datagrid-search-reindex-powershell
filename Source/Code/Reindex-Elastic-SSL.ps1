@@ -39,6 +39,14 @@ This will be the number of Replicas shards created for the new index.
 
 .PARAMETER repoName
 This is the registered name of the Repository in elastic search to return this value from REST use GET _snapshot
+
+.EXAMPLE
+
+.\Reindex-Elastic-SSL.ps1 -nodeName clientnodename -prefix audit -indexType audit -newShardCount 2 -numberOfReplicas 1 -repoName datagridbackup
+
+.EXAMPLE
+
+.\Reindex-Elastic-SSL.ps1 -nodeName clientnodename -prefix audit -indexType audit -repoName datagridbackup
 #>
 [CmdletBinding()]
 param(
