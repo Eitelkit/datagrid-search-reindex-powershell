@@ -11,15 +11,17 @@ BACKUP YOUR INDEX BEFORE RUNNING THIS SCRIPT!!!
 
 The scripts full run will:
 
-1.) Create a snapshot of all the indexes listed in the indexes.txt file in the same folder as the script.
-2.) Loop through the list. Reindex the original to the orginal name with _r appended to the index name.
-3.) The mappings for each original index are applied to a new index.
-4.) Copy the aliases from the original index to the new index.
-5.) Create a snapshot of the _r indexes.
-6.) Delete the original index.
-7.) Restore and rename using the orignal name from the _r snapshot.
-8.) Delete the _r indexes.
-9.) Loop to step 2 for the remaining entries.
+
+1.) Loop through the list. 
+2.) Create a Backup of each individual entry
+3.) Reindex the original to the orginal name with _r appended to the index name.
+4.) The mappings for each original index are applied to a new index.
+5.) Copy the aliases from the original index to the new index.
+6.) Create a snapshot of the _r indexes.
+7.) Delete the original index.
+8.) Restore and rename using the orignal name from the _r snapshot.
+9.) Delete the _r indexes.
+10.)Loop to step 1 for the remaining entries.
 
 When the operation is finished no additonal work needs to be done.
 
@@ -140,14 +142,14 @@ Function CheckIndexExists
 
 function CreateOriginalSnapShot 
 {
-    $indexListString = $indexList -join ","
     $script:snapName = "original_snapshot_" + (get-date -Format MM.dd_hh.mm.ss)
     $body = @"
     {
-    "indices": "$indexListString"
+    "indices": "$originalIndex"
     }
 "@
     Invoke-RestMethod -Uri "https://$nodeName`:9200/_snapshot/$repoName/$snapName" -Method Put -ContentType $contentType -Credential $mycreds -Body $body 2>&1 | %{ "$_" } | Write-Log
+
 }
 
 #endregion
@@ -251,7 +253,7 @@ function RemoveUnderScoreRIndex {
 
 #endregion
 
-#region Create Backups of the indexes corresponding to values listed in the $indexList variable.
+#region Check for existence of indexes corresponding to values listed in the $indexList variable.
 
 GetIndexList
 
@@ -261,13 +263,6 @@ Write-Log "<<Begin reindex on all indexes in the indexes.txt file.>>`r"
 
 Write-Log ("<<The index count is " + $indexList.Count.ToString() + ".>>")
 
-Write-Host "Creating a snapshot of the indexes specified in the indexes.txt file.`r`n" -foregroundcolor Green
-
-CreateOriginalSnapShot
-
-SnapShotStatusLoop
-
-GetSnapShotStatus
 
 #endregion
 
@@ -279,6 +274,20 @@ Foreach ($originalIndex in $indexList)
     $startTime = Get-Date -format MM.dd.yy.HH.mm.ss
     Write-Log "Captains log, Star date $startTime `r`n"
     Write-Log "<<Original index name: $originalIndex.>>`r`n"
+    #endregion
+
+    #region Snapshot the $orginalIndex
+
+    Write-Host "Creating snapshot of index $originalIndex." -ForegroundColor Green
+
+    CreateOriginalSnapShot
+
+    
+
+    SnapShotStatusLoop
+
+    GetSnapShotStatus
+
     #endregion
 
     #region GetDocumentCountOldIndex function.  Returns $oldDocsCount the number of documents in $originalIndex.
